@@ -4,7 +4,38 @@ Transform: AWS::Serverless-2016-10-31
 Parameters:
   EndpointUrl:
     Type: String
-    Default: ""          # vazio na AWS real; preenchido só no LocalStack
+    Default: ""
+    Description: Endpoint local do LocalStack; vazio na AWS.
+  HabilitarAtribuicao:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Habilita o consumidor SQS de atribuição de demonstração.
+  AtendenteDemoId:
+    Type: String
+    Default: atendente-demo-01
+    AllowedPattern: "^[A-Za-z0-9._-]{1,128}$"
+    Description: Identificador fixo usado para atribuir chamados na demonstração.
+  ProtocoloAlertaCritico:
+    Type: String
+    Default: none
+    AllowedValues: [none, email, sms]
+    Description: Protocolo de assinatura do tópico de chamados críticos.
+  DestinoAlertaCritico:
+    Type: String
+    Default: ""
+    Description: E-mail ou número de telefone da equipe; assinatura requer confirmação.
+  TopicoAlarmeDlqArn:
+    Type: String
+    Default: ""
+    Description: ARN opcional de tópico SNS para ações dos alarmes das DLQs.
+
+Conditions:
+  AtribuicaoHabilitada: !Equals [!Ref HabilitarAtribuicao, "true"]
+  AlertaCriticoConfigurado: !And
+    - !Not [!Equals [!Ref ProtocoloAlertaCritico, none]]
+    - !Not [!Equals [!Ref DestinoAlertaCritico, ""]]
+  NotificacaoAlarmeConfigurada: !Not [!Equals [!Ref TopicoAlarmeDlqArn, ""]]
 
 Globals:
   Function:
@@ -14,7 +45,10 @@ Globals:
     Environment:
       Variables:
         TABELA: !Ref TabelaChamados
+        BUCKET_ANEXOS: !Ref BucketAnexos
         ENDPOINT_URL: !Ref EndpointUrl
+        MAX_ANEXO_BYTES: "10485760"
+        TIPOS_ANEXO_PERMITIDOS: "application/pdf,image/jpeg,image/png,text/plain"
 
 Resources:
   TabelaChamados:
@@ -22,34 +56,459 @@ Resources:
     Properties:
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
-        - { AttributeName: PK, AttributeType: S }
-        - { AttributeName: SK, AttributeType: S }
-        - { AttributeName: statusPk, AttributeType: S }
-        - { AttributeName: criadoEm, AttributeType: S }
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: tipoPk
+          AttributeType: S
+        - AttributeName: criadoEmId
+          AttributeType: S
+        - AttributeName: criadoEm
+          AttributeType: S
+        - AttributeName: statusPk
+          AttributeType: S
+        - AttributeName: statusListaPk
+          AttributeType: S
+        - AttributeName: responsavelPk
+          AttributeType: S
       KeySchema:
-        - { AttributeName: PK, KeyType: HASH }
-        - { AttributeName: SK, KeyType: RANGE }
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
       GlobalSecondaryIndexes:
+        - IndexName: GSI-Criado
+          KeySchema:
+            - AttributeName: tipoPk
+              KeyType: HASH
+            - AttributeName: criadoEmId
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
         - IndexName: GSI-Status
           KeySchema:
-            - { AttributeName: statusPk, KeyType: HASH }
-            - { AttributeName: criadoEm, KeyType: RANGE }
-          Projection: { ProjectionType: ALL }
+            - AttributeName: statusPk
+              KeyType: HASH
+            - AttributeName: criadoEm
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI-StatusLista
+          KeySchema:
+            - AttributeName: statusListaPk
+              KeyType: HASH
+            - AttributeName: criadoEmId
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI-Responsavel
+          KeySchema:
+            - AttributeName: responsavelPk
+              KeyType: HASH
+            - AttributeName: criadoEmId
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
+
+  TopicoChamadoCriado:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: chamado-criado
+
+  TopicoChamadoCritico:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: chamado-critico
+
+  FilaAtribuicaoDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: atribuicao-dlq
+      MessageRetentionPeriod: 1209600
+
+  FilaAtribuicao:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: atribuicao
+      MessageRetentionPeriod: 1209600
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt FilaAtribuicaoDlq.Arn
+        maxReceiveCount: 3
+
+  PoliticaFilaAtribuicao:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref FilaAtribuicao
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt FilaAtribuicao.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref TopicoChamadoCriado
+
+  AssinaturaFilaAtribuicao:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref TopicoChamadoCriado
+      Protocol: sqs
+      Endpoint: !GetAtt FilaAtribuicao.Arn
+      RawMessageDelivery: true
+
+  AssinaturaAlertaCritico:
+    Type: AWS::SNS::Subscription
+    Condition: AlertaCriticoConfigurado
+    Properties:
+      TopicArn: !Ref TopicoChamadoCritico
+      Protocol: !Ref ProtocoloAlertaCritico
+      Endpoint: !Ref DestinoAlertaCritico
+
+  BucketAnexos:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: RemoverAnexosPendentes
+            Status: Enabled
+            TagFilters:
+              - Key: status
+                Value: pendente
+            ExpirationInDays: 7
+            NoncurrentVersionExpirationInDays: 7
+          - Id: TransicionarAnexosConfirmados
+            Status: Enabled
+            TagFilters:
+              - Key: status
+                Value: confirmado
+            Transitions:
+              - TransitionInDays: 90
+                StorageClass: STANDARD_IA
+            NoncurrentVersionTransitions:
+              - TransitionInDays: 90
+                StorageClass: STANDARD_IA
 
   CriarFn:
     Type: AWS::Serverless::Function
     Properties:
       Handler: criar.handler
-      Policies: [DynamoDBCrudPolicy: { TableName: !Ref TabelaChamados }]
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: dynamodb:TransactWriteItems
+              Resource: !GetAtt TabelaChamados.Arn
       Events:
-        Api: { Type: Api, Properties: { Path: /chamados, Method: post } }
+        Api:
+          Type: Api
+          Properties:
+            Path: /chamados
+            Method: post
+
+  ListarFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: listar.handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub "${TabelaChamados.Arn}/index/*"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /chamados
+            Method: get
 
   ObterFn:
     Type: AWS::Serverless::Function
     Properties:
       Handler: obter.handler
-      Policies: [DynamoDBReadPolicy: { TableName: !Ref TabelaChamados }]
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource: !GetAtt TabelaChamados.Arn
       Events:
-        Api: { Type: Api, Properties: { Path: "/chamados/{id}", Method: get } }
+        Api:
+          Type: Api
+          Properties:
+            Path: /chamados/{id}
+            Method: get
 
-  # ListarFn (GET /chamados) e AtualizarFn (PATCH /chamados/{id}) seguem o mesmo molde
+  AtualizarFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: atualizar.handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:TransactWriteItems
+                - dynamodb:GetItem
+              Resource: !GetAtt TabelaChamados.Arn
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /chamados/{id}
+            Method: patch
+
+  ComentarioFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: comentarios.handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource: !GetAtt TabelaChamados.Arn
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /chamados/{id}/comentarios
+            Method: post
+
+  SolicitarAnexoFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: anexos.upload_handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource: !GetAtt TabelaChamados.Arn
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource: !Sub "${BucketAnexos.Arn}/anexos/*"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /chamados/{id}/anexos
+            Method: post
+
+  ConfirmarAnexoFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: anexos.confirmar_handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt TabelaChamados.Arn
+            - Effect: Allow
+              Action:
+                - s3:GetObjectVersion
+                - s3:GetObjectVersionTagging
+                - s3:PutObjectVersionTagging
+              Resource: !Sub "${BucketAnexos.Arn}/anexos/*"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /chamados/{id}/anexos/confirmacao
+            Method: post
+
+  BaixarAnexoFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: anexos.download_handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+              Resource: !GetAtt TabelaChamados.Arn
+            - Effect: Allow
+              Action:
+                - s3:GetObjectVersion
+              Resource: !Sub "${BucketAnexos.Arn}/anexos/*"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /chamados/{id}/anexos/{anexoId}
+            Method: get
+
+  PublicarEventosFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: publicar.handler
+      Environment:
+        Variables:
+          TOPICO_CHAMADO_CRIADO: !Ref TopicoChamadoCriado
+          TOPICO_CHAMADO_CRITICO: !Ref TopicoChamadoCritico
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:DescribeStream
+                - dynamodb:GetRecords
+                - dynamodb:GetShardIterator
+              Resource: !GetAtt TabelaChamados.StreamArn
+            - Effect: Allow
+              Action: dynamodb:ListStreams
+              Resource: "*"
+            - Effect: Allow
+              Action: sns:Publish
+              Resource:
+                - !Ref TopicoChamadoCriado
+                - !Ref TopicoChamadoCritico
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt PublicacaoDlq.Arn
+      Events:
+        ChamadosStream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt TabelaChamados.StreamArn
+            StartingPosition: TRIM_HORIZON
+            BatchSize: 10
+            BisectBatchOnFunctionError: true
+            MaximumRetryAttempts: 3
+            DestinationConfig:
+              OnFailure:
+                Type: SQS
+                Destination: !GetAtt PublicacaoDlq.Arn
+
+  PublicacaoDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: publicacao-eventos-dlq
+      MessageRetentionPeriod: 1209600
+
+  AtribuirFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: atribuir.handler
+      Timeout: 10
+      Environment:
+        Variables:
+          ATENDENTE_DEMO_ID: !Ref AtendenteDemoId
+      Events:
+        Atribuicao:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt FilaAtribuicao.Arn
+            BatchSize: 1
+            Enabled: !If [AtribuicaoHabilitada, true, false]
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - sqs:ReceiveMessage
+                - sqs:DeleteMessage
+                - sqs:GetQueueAttributes
+                - sqs:ChangeMessageVisibility
+              Resource: !GetAtt FilaAtribuicao.Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:TransactWriteItems
+              Resource: !GetAtt TabelaChamados.Arn
+
+  AlarmeAtribuicaoDlq:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Mensagens aguardando análise na DLQ de atribuição.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt FilaAtribuicaoDlq.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If
+        - NotificacaoAlarmeConfigurada
+        - [!Ref TopicoAlarmeDlqArn]
+        - !Ref AWS::NoValue
+
+  AlarmePublicacaoDlq:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Falhas persistentes ao publicar eventos do outbox no SNS.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt PublicacaoDlq.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If
+        - NotificacaoAlarmeConfigurada
+        - [!Ref TopicoAlarmeDlqArn]
+        - !Ref AWS::NoValue
+
+Outputs:
+  ApiUrl:
+    Description: URL base da API
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  BucketAnexosNome:
+    Description: Bucket privado usado para os anexos
+    Value: !Ref BucketAnexos
+  TopicoChamadoCriadoArn:
+    Description: ARN do tópico de chamados criados
+    Value: !Ref TopicoChamadoCriado
+  TopicoChamadoCriticoArn:
+    Description: ARN do tópico de chamados críticos
+    Value: !Ref TopicoChamadoCritico
+  FilaAtribuicaoNome:
+    Description: Fila de atribuição automática (consumo desabilitado até configurar atendentes)
+    Value: !GetAtt FilaAtribuicao.QueueName
+  FilaAtribuicaoDlqNome:
+    Description: Fila de mensagens de atribuição não processadas
+    Value: !GetAtt FilaAtribuicaoDlq.QueueName
