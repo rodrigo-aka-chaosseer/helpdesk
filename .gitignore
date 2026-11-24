@@ -1,0 +1,30 @@
+# Variáveis locais e credenciais
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+build/
+dist/
+
+# Testes e cobertura
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# AWS SAM e dados locais
+.aws-sam/
+.localstack/
+
+# Arquivos do sistema operacional
+.DS_Store
+Thumbs.db

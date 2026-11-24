@@ -1,0 +1,55 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  EndpointUrl:
+    Type: String
+    Default: ""          # vazio na AWS real; preenchido só no LocalStack
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 10
+    CodeUri: src/
+    Environment:
+      Variables:
+        TABELA: !Ref TabelaChamados
+        ENDPOINT_URL: !Ref EndpointUrl
+
+Resources:
+  TabelaChamados:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: PK, AttributeType: S }
+        - { AttributeName: SK, AttributeType: S }
+        - { AttributeName: statusPk, AttributeType: S }
+        - { AttributeName: criadoEm, AttributeType: S }
+      KeySchema:
+        - { AttributeName: PK, KeyType: HASH }
+        - { AttributeName: SK, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: GSI-Status
+          KeySchema:
+            - { AttributeName: statusPk, KeyType: HASH }
+            - { AttributeName: criadoEm, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+
+  CriarFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: criar.handler
+      Policies: [DynamoDBCrudPolicy: { TableName: !Ref TabelaChamados }]
+      Events:
+        Api: { Type: Api, Properties: { Path: /chamados, Method: post } }
+
+  ObterFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: obter.handler
+      Policies: [DynamoDBReadPolicy: { TableName: !Ref TabelaChamados }]
+      Events:
+        Api: { Type: Api, Properties: { Path: "/chamados/{id}", Method: get } }
+
+  # ListarFn (GET /chamados) e AtualizarFn (PATCH /chamados/{id}) seguem o mesmo molde
