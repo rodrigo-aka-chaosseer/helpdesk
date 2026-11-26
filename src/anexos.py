@@ -103,16 +103,20 @@ def upload_handler(event, context):
         "criadoEm": criado_em,
         "ttl": int(time.time()) + 7 * 24 * 60 * 60,
     }
+    tagging = (
+        "<Tagging><TagSet><Tag><Key>status</Key>"
+        "<Value>pendente</Value></Tag></TagSet></Tagging>"
+    )
     url = cliente_s3().generate_presigned_post(
         Bucket=os.environ["BUCKET_ANEXOS"],
         Key=chave_s3,
         Fields={
             "Content-Type": content_type,
-            "tagging": "status=pendente",
+            "tagging": tagging,
         },
         Conditions=[
             {"Content-Type": content_type},
-            {"tagging": "status=pendente"},
+            {"tagging": tagging},
             ["content-length-range", tamanho, tamanho],
         ],
         ExpiresIn=EXPIRACAO_URL_SEGUNDOS,

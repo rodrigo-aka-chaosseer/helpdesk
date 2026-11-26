@@ -10,7 +10,6 @@ from comum import (
     ler_body,
     resposta,
     responsavel_do_evento,
-    serializar_item,
     tabela,
     validar_texto,
     validar_uuid,
@@ -33,7 +32,7 @@ def _gravar_atualizacao(
 ):
     atualizacao = {
         "TableName": tabela_chamados.name,
-        "Key": serializar_item(chave),
+        "Key": chave,
         "UpdateExpression": expressao,
         "ExpressionAttributeNames": nomes,
         "ConditionExpression": "attribute_exists(PK)",
@@ -41,14 +40,14 @@ def _gravar_atualizacao(
     if condicao_prioridade:
         atualizacao["ConditionExpression"] += f" AND {condicao_prioridade}"
     if valores:
-        atualizacao["ExpressionAttributeValues"] = serializar_item(valores)
+        atualizacao["ExpressionAttributeValues"] = valores
 
     transacoes = [
         {"Update": atualizacao},
         {
             "Put": {
                 "TableName": tabela_chamados.name,
-                "Item": serializar_item(evento),
+                "Item": evento,
                 "ConditionExpression": (
                     "attribute_not_exists(PK) AND attribute_not_exists(SK)"
                 ),
@@ -60,7 +59,7 @@ def _gravar_atualizacao(
             {
                 "Put": {
                     "TableName": tabela_chamados.name,
-                    "Item": serializar_item(outbox),
+                    "Item": outbox,
                     "ConditionExpression": (
                         "attribute_not_exists(PK) AND attribute_not_exists(SK)"
                     ),

@@ -4,7 +4,7 @@ import uuid
 
 from botocore.exceptions import ClientError
 
-from comum import agora, codigo_erro, serializar_item, tabela, validar_texto, validar_uuid
+from comum import agora, codigo_erro, tabela, validar_texto, validar_uuid
 
 
 def _chamado_id_da_mensagem(registro):
@@ -71,7 +71,7 @@ def _registrar_atribuicao(tabela_chamados, chamado, atendente_id, timestamp):
                 {
                     "Update": {
                         "TableName": tabela_chamados.name,
-                        "Key": serializar_item(chave),
+                        "Key": chave,
                         "UpdateExpression": (
                             "SET #responsavelId = :responsavelId, "
                             "#responsavelPk = :responsavelPk, "
@@ -86,13 +86,13 @@ def _registrar_atribuicao(tabela_chamados, chamado, atendente_id, timestamp):
                             "AND #status = :aberto"
                         ),
                         "ExpressionAttributeNames": nomes,
-                        "ExpressionAttributeValues": serializar_item(valores),
+                        "ExpressionAttributeValues": valores,
                     }
                 },
                 {
                     "Put": {
                         "TableName": tabela_chamados.name,
-                        "Item": serializar_item(evento),
+                        "Item": evento,
                         "ConditionExpression": (
                             "attribute_not_exists(PK) AND attribute_not_exists(SK)"
                         ),

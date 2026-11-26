@@ -6,7 +6,6 @@ from comum import (
     ler_body,
     resposta,
     responsavel_do_evento,
-    serializar_item,
     tabela,
     validar_texto,
 )
@@ -51,14 +50,14 @@ def handler(event, context):
             {
                 "Put": {
                     "TableName": tabela_chamados.name,
-                    "Item": serializar_item(item),
+                    "Item": item,
                     "ConditionExpression": "attribute_not_exists(PK)",
                 }
             },
             {
                 "Put": {
                     "TableName": tabela_chamados.name,
-                    "Item": serializar_item(evento),
+                    "Item": evento,
                     "ConditionExpression": (
                         "attribute_not_exists(PK) AND attribute_not_exists(SK)"
                     ),

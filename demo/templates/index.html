@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Helpdesk | Demonstração local</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark">H</span>
+      <span>helpdesk<span class="brand-light">/demo</span></span>
+    </a>
+    <div class="topbar-right">
+      <span class="environment"><span class="online-dot"></span> LocalStack</span>
+      <span class="avatar">RD</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="intro">
+      <div>
+        <p class="eyebrow">PAINEL DE OPERAÇÕES</p>
+        <h1>Central de chamados</h1>
+        <p class="muted">Demonstração dos fluxos REST, atribuição assíncrona e anexos.</p>
+      </div>
+      <div id="connection-state" class="connection-state" data-ready="{{ 'true' if api_ready else 'false' }}">
+        <span class="online-dot"></span>
+        <span>{{ "API configurada" if api_ready else "API_URL não encontrada" }}</span>
+      </div>
+    </section>
+
+    <div id="notice" class="notice" role="status" hidden></div>
+
+    <section class="workspace">
+      <aside class="panel ticket-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">ATENDIMENTO</p>
+            <h2>Chamados</h2>
+          </div>
+          <button id="new-ticket-button" class="button button-primary button-small" type="button">+ Novo</button>
+        </div>
+
+        <form id="filters" class="filters">
+          <label>
+            <span>Status</span>
+            <select name="status">
+              <option value="">Todos os status</option>
+              <option value="ABERTO">Aberto</option>
+              <option value="EM_ATENDIMENTO">Em atendimento</option>
+              <option value="RESOLVIDO">Resolvido</option>
+              <option value="FECHADO">Fechado</option>
+            </select>
+          </label>
+          <label>
+            <span>Responsável</span>
+            <input name="responsavel" placeholder="ID do atendente">
+          </label>
+          <button class="button button-secondary button-full" type="submit">Filtrar chamados</button>
+        </form>
+
+        <div id="ticket-list" class="ticket-list" aria-live="polite">
+          <p class="empty-state">Carregando chamados…</p>
+        </div>
+        <button id="load-more" class="button button-quiet button-full" type="button" hidden>Carregar mais</button>
+      </aside>
+
+      <section class="panel detail-panel">
+        <div id="empty-detail" class="empty-detail">
+          <div class="empty-icon">◎</div>
+          <h2>Selecione um chamado</h2>
+          <p>Abra um item da lista para consultar o histórico, atualizar o status ou responder.</p>
+          <button class="button button-primary" type="button" data-new-ticket>Abrir chamado</button>
+        </div>
+
+        <div id="ticket-detail" hidden>
+          <div class="detail-heading">
+            <div>
+              <p class="eyebrow" id="ticket-id"></p>
+              <h2 id="ticket-title"></h2>
+              <p id="ticket-description" class="muted"></p>
+            </div>
+            <span id="ticket-priority" class="priority"></span>
+          </div>
+
+          <div class="ticket-meta">
+            <span id="ticket-status" class="status"></span>
+            <span id="ticket-category"></span>
+            <span id="ticket-created"></span>
+            <span id="ticket-owner"></span>
+          </div>
+
+          <section class="subsection">
+            <div class="section-title">
+              <h3>Atualizar chamado</h3>
+              <span class="section-hint">As alterações ficam no histórico</span>
+            </div>
+            <form id="update-form" class="update-form">
+              <label>
+                <span>Status</span>
+                <select name="status">
+                  <option value="ABERTO">Aberto</option>
+                  <option value="EM_ATENDIMENTO">Em atendimento</option>
+                  <option value="RESOLVIDO">Resolvido</option>
+                  <option value="FECHADO">Fechado</option>
+                </select>
+              </label>
+              <label>
+                <span>Prioridade</span>
+                <select name="prioridade">
+                  <option value="BAIXA">Baixa</option>
+                  <option value="MEDIA">Média</option>
+                  <option value="ALTA">Alta</option>
+                  <option value="CRITICA">Crítica</option>
+                </select>
+              </label>
+              <label class="owner-field">
+                <span>Responsável</span>
+                <input name="responsavelId" maxlength="128" placeholder="ID do atendente">
+              </label>
+              <div class="update-actions">
+                <button id="clear-owner" class="button button-quiet" type="button">Remover responsável</button>
+                <button class="button button-primary" type="submit">Salvar alterações</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="subsection">
+            <div class="section-title">
+              <h3>Histórico</h3>
+              <span id="history-count" class="count-badge">0</span>
+            </div>
+            <div id="history" class="history"></div>
+          </section>
+
+          <section class="subsection">
+            <div class="section-title"><h3>Anexos</h3></div>
+            <div id="attachments" class="attachments"></div>
+            <form id="attachment-form" class="attachment-form">
+              <label class="file-picker">
+                <input type="file" name="arquivo" accept=".pdf,.jpg,.jpeg,.png,.txt,application/pdf,image/jpeg,image/png,text/plain" required>
+                <span id="attachment-file-label">Escolher PDF, imagem ou texto (até 10 MiB)</span>
+              </label>
+              <button id="upload-button" class="button button-secondary" type="submit">Enviar anexo</button>
+            </form>
+          </section>
+
+          <form id="comment-form" class="comment-form">
+            <label for="comment-text">Adicionar comentário</label>
+            <div class="comment-compose">
+              <textarea id="comment-text" name="texto" maxlength="5000" placeholder="Escreva uma atualização para o histórico…" required></textarea>
+              <button class="button button-primary" type="submit">Enviar</button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </section>
+    <footer>Interface demonstrativa local · as operações são enviadas à API do projeto</footer>
+  </main>
+
+  <dialog id="new-ticket-dialog" class="dialog">
+    <form id="create-form" method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">NOVO REGISTRO</p>
+          <h2>Abrir chamado</h2>
+        </div>
+        <button id="close-dialog" class="icon-button" type="button" aria-label="Fechar">×</button>
+      </div>
+      <label>
+        <span>Título</span>
+        <input name="titulo" maxlength="200" required placeholder="Ex.: Não consigo acessar o sistema">
+      </label>
+      <label>
+        <span>Descrição</span>
+        <textarea name="descricao" maxlength="5000" required placeholder="Descreva o que aconteceu…"></textarea>
+      </label>
+      <label>
+        <span>Categoria</span>
+        <input name="categoria" maxlength="100" required placeholder="Ex.: Acesso">
+      </label>
+      <div class="dialog-actions">
+        <button id="cancel-dialog" class="button button-quiet" type="button">Cancelar</button>
+        <button class="button button-primary" type="submit">Criar chamado</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

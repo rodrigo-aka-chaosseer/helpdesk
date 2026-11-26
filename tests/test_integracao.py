@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
+from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -24,14 +24,6 @@ import publicar
 CHAMADO_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 ANEXO_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 _DYNAMODB_SERIALIZER = TypeSerializer()
-_DYNAMODB_DESERIALIZER = TypeDeserializer()
-
-
-def deserialize_item(item):
-    return {
-        key: _DYNAMODB_DESERIALIZER.deserialize(value)
-        for key, value in item.items()
-    }
 
 
 def serialize_item(item):
@@ -84,13 +76,11 @@ class FakeDynamoClient:
         for transaction in kwargs["TransactItems"]:
             update = transaction.get("Update")
             if update:
-                chave = deserialize_item(update["Key"])
+                chave = update["Key"]
                 item = self.table.items.get((chave["PK"], chave["SK"]))
                 if item:
                     nomes = update["ExpressionAttributeNames"]
-                    valores = deserialize_item(
-                        update.get("ExpressionAttributeValues", {})
-                    )
+                    valores = update.get("ExpressionAttributeValues", {})
                     expressao, *remocoes = update["UpdateExpression"].split(
                         " REMOVE ", 1
                     )
@@ -104,7 +94,7 @@ class FakeDynamoClient:
                             item.pop(nomes[nome.strip()], None)
             put = transaction.get("Put")
             if put:
-                item = deserialize_item(put["Item"])
+                item = put["Item"]
                 self.table.items[(item["PK"], item["SK"])] = item
 
 
@@ -113,7 +103,7 @@ class ConcurrentAssignmentClient:
         self.table = table
 
     def transact_write_items(self, **kwargs):
-        key = deserialize_item(kwargs["TransactItems"][0]["Update"]["Key"])
+        key = kwargs["TransactItems"][0]["Update"]["Key"]
         item = self.table.items[(key["PK"], key["SK"])]
         item.update(
             {
@@ -407,7 +397,7 @@ class EndpointsTest(unittest.TestCase):
         transaction = table.meta.client.transaction_calls[0]["TransactItems"]
         update = transaction[0]["Update"]
         self.assertEqual(
-            deserialize_item(update["ExpressionAttributeValues"]),
+            update["ExpressionAttributeValues"],
             {
                 ":status": "RESOLVIDO",
                 ":statusPk": "RESOLVIDO#2026-01",
@@ -415,7 +405,7 @@ class EndpointsTest(unittest.TestCase):
                 ":atualizadoEm": body(response)["atualizadoEm"],
             },
         )
-        evento = deserialize_item(transaction[1]["Put"]["Item"])
+        evento = transaction[1]["Put"]["Item"]
         self.assertEqual(evento["tipo"], "CHAMADO_ATUALIZADO")
         self.assertEqual(evento["alteracoes"]["status"]["para"], "RESOLVIDO")
         self.assertEqual(invalid["statusCode"], 400)
@@ -434,12 +424,10 @@ class EndpointsTest(unittest.TestCase):
         update = transaction[0]["Update"]
         self.assertIn("#prioridade = :prioridadeAnterior", update["ConditionExpression"])
         self.assertEqual(
-            _DYNAMODB_DESERIALIZER.deserialize(
-                update["ExpressionAttributeValues"][":prioridadeAnterior"]
-            ),
+            update["ExpressionAttributeValues"][":prioridadeAnterior"],
             "MEDIA",
         )
-        outbox = deserialize_item(transaction[2]["Put"]["Item"])
+        outbox = transaction[2]["Put"]["Item"]
         self.assertEqual(outbox["eventType"], "chamado-critico")
         self.assertEqual(outbox["chamadoId"], CHAMADO_ID)
         self.assertEqual(outbox["prioridade"], "CRITICA")
@@ -506,6 +494,15 @@ class EndpointsTest(unittest.TestCase):
         self.assertEqual(response["statusCode"], 201)
         self.assertEqual(body(response)["expiresIn"], 300)
         self.assertEqual(s3.presigned_posts[0]["Conditions"][-1], ["content-length-range", 4, 4])
+        self.assertEqual(
+            s3.presigned_posts[0]["Fields"]["tagging"],
+            "<Tagging><TagSet><Tag><Key>status</Key>"
+            "<Value>pendente</Value></Tag></TagSet></Tagging>",
+        )
+        self.assertEqual(
+            s3.presigned_posts[0]["Conditions"][1]["tagging"],
+            s3.presigned_posts[0]["Fields"]["tagging"],
+        )
         stored_attachment = next(
             item for item in table.items.values() if item.get("anexoId")
         )
@@ -739,7 +736,7 @@ class EndpointsTest(unittest.TestCase):
             "attribute_not_exists(#responsavelId)",
             atualizacao["ConditionExpression"],
         )
-        historico = deserialize_item(transacao[1]["Put"]["Item"])
+        historico = transacao[1]["Put"]["Item"]
         self.assertEqual(historico["tipo"], "CHAMADO_ATRIBUIDO_AUTOMATICAMENTE")
         self.assertEqual(historico["responsavelId"], "atendente-demo-01")
 

@@ -2,9 +2,16 @@ services:
   localstack:
     image: localstack/localstack
     ports:
-      - "4566:4566"   # endpoint único para todos os serviços
+      - "4566:4566"
     environment:
-      - SERVICES=s3,sqs,sns,dynamodb,lambda,apigateway
+      - SERVICES=apigateway,cloudformation,cloudwatch,dynamodb,iam,lambda,logs,s3,sns,sqs,sts
       - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN}
+      - LAMBDA_DOCKER_NETWORK=helpdesk-local
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - helpdesk
+
+networks:
+  helpdesk:
+    name: helpdesk-local

@@ -7,10 +7,6 @@ from decimal import Decimal
 
 import boto3
 from botocore.config import Config
-from boto3.dynamodb.types import TypeSerializer
-
-
-_DYNAMODB_SERIALIZER = TypeSerializer()
 
 
 def tabela():
@@ -29,13 +25,6 @@ def cliente_s3():
 def cliente_sns():
     endpoint = os.environ.get("ENDPOINT_URL") or None
     return boto3.client("sns", endpoint_url=endpoint)
-
-
-def serializar_item(item):
-    return {
-        nome: _DYNAMODB_SERIALIZER.serialize(valor)
-        for nome, valor in item.items()
-    }
 
 
 def criar_evento_outbox(tipo, chamado_id, timestamp, **atributos):

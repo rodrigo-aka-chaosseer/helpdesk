@@ -8,12 +8,12 @@ Parameters:
     Description: Endpoint local do LocalStack; vazio na AWS.
   HabilitarAtribuicao:
     Type: String
-    Default: "false"
+    Default: "true"
     AllowedValues: ["true", "false"]
     Description: Habilita o consumidor SQS de atribuição de demonstração.
   AtendenteDemoId:
     Type: String
-    Default: atendente-demo-01
+    Default: rodrigo-dantas
     AllowedPattern: "^[A-Za-z0-9._-]{1,128}$"
     Description: Identificador fixo usado para atribuir chamados na demonstração.
   ProtocoloAlertaCritico:
@@ -141,6 +141,46 @@ Resources:
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt FilaAtribuicaoDlq.Arn
         maxReceiveCount: 3
+  
+  FilaAlertasCriticosDemo:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: alertas-criticos-demo
+      MessageRetentionPeriod: 1209600
+
+  PoliticaFilaAlertasCriticosDemo:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref FilaAlertasCriticosDemo
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt FilaAlertasCriticosDemo.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref TopicoChamadoCritico
+
+  AssinaturaFilaAlertasCriticosDemo:
+    Type: AWS::SNS::Subscription
+    DependsOn: PoliticaFilaAlertasCriticosDemo
+    Properties:
+      TopicArn: !Ref TopicoChamadoCritico
+      Protocol: sqs
+      Endpoint: !GetAtt FilaAlertasCriticosDemo.Arn
+      RawMessageDelivery: true
+  
+  FilaAlertasCriticosDemoUrl:
+    Description: URL da fila de demonstração dos alertas críticos
+    Value: !Ref FilaAlertasCriticosDemo
+  
+  FilaAlertasCriticosDemoArn:
+    Description: ARN da fila de demonstração dos alertas críticos
+    Value: !GetAtt FilaAlertasCriticosDemo.Arn  
 
   PoliticaFilaAtribuicao:
     Type: AWS::SQS::QueuePolicy

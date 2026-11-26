@@ -152,11 +152,11 @@ Esse é apenas o modelo previsto: o template atual não provisiona uma tabela ou
 - A criação grava o chamado e um evento `chamado-criado` na tabela na mesma transação. Uma alteração de prioridade para `CRITICA` grava também o evento `chamado-critico` na mesma transação do PATCH. A publicação SNS ocorre de forma assíncrona pelo stream DynamoDB; assim, uma falha no SNS não transforma uma gravação já concluída em erro HTTP nem perde o evento imediatamente.
 - O contrato publicado é JSON com `eventId`, `eventType`, `chamadoId` e `timestamp` (e `prioridade` para chamados críticos). A assinatura SNS→SQS usa entrega bruta (`RawMessageDelivery`).
 - O publisher tenta novamente até três vezes; falhas persistentes vão para `publicacao-eventos-dlq`. O TTL de 30 dias limpa os itens outbox. Streams e SNS podem entregar mais de uma vez; consumidores devem ser idempotentes.
-- `HabilitarAtribuicao` tem padrão `false`; habilite-o explicitamente para executar a demonstração. `AtendenteDemoId` define o ID fixo atribuído pelo consumidor (padrão `atendente-demo-01`); esse valor não é validado contra um cadastro real.
+- `HabilitarAtribuicao` controla o event source mapping; `AtendenteDemoId` define o ID fixo atribuído pelo consumidor e não é validado contra um cadastro real.
 - A assinatura de alerta crítico é opcional: configure `ProtocoloAlertaCritico` (`email` ou `sms`) e `DestinoAlertaCritico`. Assinaturas de e-mail exigem confirmação do destinatário.
 - Os alarmes das DLQs são criados sem destino de notificação. `TopicoAlarmeDlqArn` pode apontar para um tópico SNS existente para receber ações dos alarmes.
 - A prioridade inicial continua sendo `MEDIA`; não existe classificador automático. O alerta crítico é publicado somente quando um PATCH efetua a transição de outra prioridade para `CRITICA`.
-- `sam local start-api` não provisiona por si só os recursos AWS do template no LocalStack. Antes de testar a mensageria, implante/provisione também os tópicos, filas, políticas, stream DynamoDB e alarmes. LocalStack pode variar no suporte a DynamoDB Streams, event source mappings e CloudWatch Alarms; valide esses recursos no ambiente de integração. Os testes unitários mockam SNS e DynamoDB.
+- O `docker-compose.yaml` habilita os serviços usados pelo template e conecta as Lambdas do LocalStack à rede `helpdesk-local`. Para testar a stack sem AWS, inicie o LocalStack e implante o template com `lstk sam`, apontando o parâmetro `EndpointUrl` para `http://localstack:4566`. O `sam local start-api` sozinho não provisiona recursos nem executa o mapeamento SNS/SQS. Confira o procedimento local abaixo. A cobertura de alguns recursos, como DynamoDB Streams, event source mappings e CloudWatch Alarms, pode variar por versão/edição do LocalStack.
 
 ## Fluxos principais
 
@@ -192,7 +192,42 @@ Esse é apenas o modelo previsto: o template atual não provisiona uma tabela ou
 
 ### Atribuição automática
 
-Para a demonstração, `AtribuirFn` usa um único ID fixo configurável por `AtendenteDemoId`; não consulta uma tabela de atendentes nem distribui carga. Ao receber `chamado-criado`, lê o chamado consistentemente e, se ele ainda estiver `ABERTO` e sem responsável, grava `responsavelId`, `responsavelPk`, status `EM_ATENDIMENTO` e um evento de histórico na mesma transação. A condição de escrita impede sobrescrever atribuições manuais e torna reentregas idempotentes. Se o chamado já tiver responsável ou não estiver aberto, a mensagem é reconhecida sem alteração. O mapeamento SQS→Lambda continua desabilitado por padrão; defina `HabilitarAtribuicao=true` explicitamente para a demonstração. Esse atendente é apenas um identificador de demonstração, não uma identidade autenticada nem um cadastro validado.
+Para a demonstração, `AtribuirFn` usa um único ID fixo configurável por `AtendenteDemoId`; não consulta uma tabela de atendentes nem distribui carga. Ao receber `chamado-criado`, lê o chamado consistentemente e, se ele ainda estiver `ABERTO` e sem responsável, grava `responsavelId`, `responsavelPk`, status `EM_ATENDIMENTO` e um evento de histórico na mesma transação. A condição de escrita impede sobrescrever atribuições manuais e torna reentregas idempotentes. Se o chamado já tiver responsável ou não estiver aberto, a mensagem é reconhecida sem alteração. O event source mapping é controlado por `HabilitarAtribuicao`; o template atual define o padrão desse parâmetro, mas o deploy local abaixo o sobrescreve para `true`. Esse atendente é apenas um identificador de demonstração, não uma identidade autenticada nem um cadastro validado.
+
+### Teste local completo com LocalStack
+
+1. Instale Docker, AWS CLI, AWS SAM CLI (versão 1.95.0 ou mais recente) e o CLI `lstk` do LocalStack. O `samlocal` legado está obsoleto; use `lstk sam`. O token de autenticação do LocalStack, se exigido pela versão/edição instalada, é apenas para o LocalStack; não são necessárias credenciais AWS.
+2. Na raiz do projeto, inicie o LocalStack com `docker compose up -d` e confirme que está saudável com `docker compose ps` e `curl http://localhost:4566/_localstack/health`.
+3. Implante o template no endpoint local, não no AWS:
+
+   ```bash
+   lstk --endpoint-url http://localhost:4566 sam build
+   lstk --endpoint-url http://localhost:4566 sam --region us-east-1 deploy \
+     --stack-name helpdesk-local \
+     --resolve-s3 \
+     --capabilities CAPABILITY_IAM \
+     --parameter-overrides \
+       ParameterKey=EndpointUrl,ParameterValue=http://localstack:4566 \
+       ParameterKey=HabilitarAtribuicao,ParameterValue=true \
+       ParameterKey=AtendenteDemoId,ParameterValue=atendente-demo-01
+   ```
+
+4. Confirme a criação dos recursos via `lstk --endpoint-url http://localhost:4566 aws cloudformation describe-stacks --stack-name helpdesk-local --region us-east-1`. Para listar recursos, use `lstk --endpoint-url http://localhost:4566 aws cloudformation list-stack-resources --stack-name helpdesk-local --region us-east-1`.
+5. Descubra o ID da API criada e forme a URL local (o output `ApiUrl` do template tem formato de AWS):
+
+   ```bash
+   API_ID=$(aws --endpoint-url=http://localhost:4566 cloudformation list-stack-resources \
+     --stack-name helpdesk-local \
+     --region us-east-1 \
+     --query "StackResourceSummaries[?ResourceType=='AWS::ApiGateway::RestApi'].PhysicalResourceId | [0]" \
+     --output text)
+   API_URL="http://localhost:4566/restapis/${API_ID}/Prod/_user_request_/"
+   ```
+
+   Crie um chamado com `curl -X POST "${API_URL}chamados" -H 'Content-Type: application/json' -d '{"titulo":"Teste local","descricao":"Fluxo SNS-SQS","categoria":"Geral"}'` e consulte-o com `GET /chamados/{id}`. Aguarde o processamento assíncrono e verifique responsável, status e histórico.
+6. Se a stack não implantar ou o evento não for consumido, confira a versão/edição do LocalStack e seus logs. Confirme também se Streams, a integração SNS→SQS e os event source mappings DynamoDB/SQS estão disponíveis e ativos nessa instalação. Use `lstk sam` para garantir que os comandos SAM apontem ao LocalStack; não execute `sam deploy` diretamente para este teste.
+
+Os comandos `lstk aws` e `lstk sam` usam o endpoint local e credenciais fictícias; não configure nem passe um perfil AWS. O endpoint `http://localhost:4566` é para comandos executados no host; dentro dos containers Lambda, `EndpointUrl` usa o nome de serviço `http://localstack:4566`. Isso mantém a execução no Docker; a implantação local não é uma validação da AWS real.
 
 ## Segurança
 
