@@ -173,14 +173,6 @@ Resources:
       Protocol: sqs
       Endpoint: !GetAtt FilaAlertasCriticosDemo.Arn
       RawMessageDelivery: true
-  
-  FilaAlertasCriticosDemoUrl:
-    Description: URL da fila de demonstração dos alertas críticos
-    Value: !Ref FilaAlertasCriticosDemo
-  
-  FilaAlertasCriticosDemoArn:
-    Description: ARN da fila de demonstração dos alertas críticos
-    Value: !GetAtt FilaAlertasCriticosDemo.Arn  
 
   PoliticaFilaAtribuicao:
     Type: AWS::SQS::QueuePolicy
@@ -214,6 +206,38 @@ Resources:
       TopicArn: !Ref TopicoChamadoCritico
       Protocol: !Ref ProtocoloAlertaCritico
       Endpoint: !Ref DestinoAlertaCritico
+
+  FilaAuditoriaDemo:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: auditoria-demo
+      MessageRetentionPeriod: 1209600
+
+  PoliticaFilaAuditoriaDemo:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref FilaAuditoriaDemo
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt FilaAuditoriaDemo.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref TopicoChamadoCriado
+
+  AssinaturaFilaAuditoriaDemo:
+    Type: AWS::SNS::Subscription
+    DependsOn: PoliticaFilaAuditoriaDemo
+    Properties:
+      TopicArn: !Ref TopicoChamadoCriado
+      Protocol: sqs
+      Endpoint: !GetAtt FilaAuditoriaDemo.Arn
+      RawMessageDelivery: true
 
   BucketAnexos:
     Type: AWS::S3::Bucket
@@ -552,3 +576,9 @@ Outputs:
   FilaAtribuicaoDlqNome:
     Description: Fila de mensagens de atribuição não processadas
     Value: !GetAtt FilaAtribuicaoDlq.QueueName
+  FilaAlertasCriticosDemoUrl:
+    Description: URL da fila de demonstração dos alertas críticos
+    Value: !Ref FilaAlertasCriticosDemo
+  FilaAlertasCriticosDemoArn:
+    Description: ARN da fila de demonstração dos alertas críticos
+    Value: !GetAtt FilaAlertasCriticosDemo.Arn

@@ -5,6 +5,7 @@ const notice = document.querySelector("#notice");
 const filters = document.querySelector("#filters");
 const loadMoreButton = document.querySelector("#load-more");
 const newTicketDialog = document.querySelector("#new-ticket-dialog");
+const auditFeed = document.querySelector("#audit-feed")
 let selectedTicketId = null;
 let nextToken = null;
 
@@ -363,5 +364,80 @@ document.querySelector("#attachment-form").addEventListener("submit", async (eve
     uploadButton.textContent = "Enviar anexo";
   }
 });
+const queueCards = document.querySelector("#queue-cards");
+const criticalAlerts = document.querySelector("#critical-alerts");
+const queueDescriptions = {
+  "atribuicao": "Eventos chamado-criado",
+  "atribuicao-dlq": "Falhas após 3 tentativas",
+  "publicacao-eventos-dlq": "Falhas do stream → SNS",
+  "alertas-criticos-demo": "Alertas chamado-critico",
+  "auditoria-demo": "Cópia de chamado-criado",
+};
 
+async function refreshMessaging() {
+  try {
+    const queues = await api("/api/mensageria/filas");
+    queueCards.replaceChildren(
+      ...queues.map((queue) => {
+        const card = makeElement("div", "queue-card");
+        const isDlq = queue.nome.endsWith("-dlq");
+        card.classList.toggle("queue-card-alert", isDlq && queue.visiveis > 0);
+        card.append(
+          makeElement("span", "queue-name", queue.nome),
+          makeElement("span", "queue-count", queue.erro ? "—" : String(queue.visiveis)),
+          makeElement(
+            "span",
+            "queue-desc",
+            queue.erro
+              ? "Fila indisponível"
+              : `${queueDescriptions[queue.nome] || ""} · ${queue.emProcessamento} em processamento`,
+          ),
+        );
+        return card;
+      }),
+    );
+
+    const alerts = await api("/api/mensageria/alertas");
+    criticalAlerts.replaceChildren();
+    if (!alerts.length) {
+      criticalAlerts.append(makeElement("p", "empty-state", "Nenhum alerta crítico na fila."));
+    }
+    alerts.forEach((alert) => {
+      const row = makeElement("div", "alert-row");
+      row.append(
+        makeElement("strong", "", `Chamado ${String(alert.chamadoId).slice(0, 8)}`),
+        makeElement("span", "priority priority-CRITICA", alert.prioridade || "CRITICA"),
+        makeElement("time", "", formatDate(alert.timestamp)),
+      );
+      criticalAlerts.append(row);
+    });
+  } catch (error) {
+    queueCards.replaceChildren(
+      makeElement("p", "empty-state", "Não foi possível consultar as filas do LocalStack."),
+    );
+  }
+}
+
+document.querySelector("#simulate-failure").addEventListener("click", async () => {
+  try {
+    await api("/api/mensageria/falha", { method: "POST" });
+    showNotice("Mensagem inválida enviada à fila atribuicao; acompanhe até a DLQ.");
+    await refreshMessaging();
+  } catch (error) {
+    showError(error);
+  }
+});
+
+document.querySelector("#clear-queues").addEventListener("click", async () => {
+  try {
+    await api("/api/mensageria/limpar", { method: "POST" });
+    showNotice("DLQ de atribuição e fila de alertas limpas.");
+    await refreshMessaging();
+  } catch (error) {
+    showError(error);
+  }
+});
+
+refreshMessaging();
+window.setInterval(refreshMessaging, 3000);
 loadTickets();

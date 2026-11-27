@@ -6,7 +6,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 import requests
 from flask import Flask, current_app, jsonify, render_template, request, send_file
-
+from demo.mensageria import bp as mensageria_bp
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 STATE_FILE = ROOT_DIR / ".localstack" / "test-state.env"
@@ -277,7 +277,7 @@ def create_app(api_url=None, localstack_endpoint=None, state_file=STATE_FILE):
             as_attachment=True,
             download_name=f"anexo-{anexo_id}",
         )
-
+    app.register_blueprint(mensageria_bp)
     return app
 
 

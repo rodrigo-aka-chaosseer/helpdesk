@@ -140,6 +140,20 @@ input::placeholder, textarea::placeholder { color: #a4aea8; }
 .notice-error { border-color: #f0c7c2; background: #fff5f3; color: #a13d36; }
 footer { padding: 18px 0 0; color: #a1aaa4; text-align: center; font-size: 10px; }
 
+.messaging-panel { margin-bottom: 18px; padding: 20px 17px; }
+.messaging-actions { display: flex; gap: 8px; }
+.queue-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 18px; }
+.queue-card { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fafcfa; }
+.queue-card-alert { border-color: #f1c4bf; background: #fff5f3; }
+.queue-name { color: #57665d; font: 600 11px ui-monospace, monospace; }
+.queue-count { font-size: 26px; font-weight: 800; letter-spacing: -.5px; }
+.queue-card-alert .queue-count { color: var(--red); }
+.queue-desc { color: var(--muted); font-size: 10px; }
+.critical-alerts { display: grid; gap: 6px; }
+.alert-row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; font-size: 11px; }
+.alert-row time { margin-left: auto; color: #a0aaa3; font-size: 10px; }
+@media (max-width: 900px) { .queue-cards { grid-template-columns: repeat(2, 1fr); } }
+
 @media (max-width: 900px) {
   .workspace { grid-template-columns: 290px minmax(0, 1fr); }
   .detail-panel { padding: 21px; }

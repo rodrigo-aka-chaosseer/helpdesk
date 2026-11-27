@@ -33,7 +33,29 @@
     </section>
 
     <div id="notice" class="notice" role="status" hidden></div>
-
+      <section class="panel messaging-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">MENSAGERIA</p>
+            <h2>Filas e eventos (SNS → SQS)</h2>
+          </div>
+          <div class="messaging-actions">
+            <button id="simulate-failure" class="button button-secondary button-small" type="button">Simular falha</button>
+            <button id="clear-queues" class="button button-quiet button-small" type="button">Limpar DLQ e alertas</button>
+          </div>
+        </div>
+        <div id="queue-cards" class="queue-cards"></div>
+        <div class="section-title">
+          <h3>Alertas críticos recebidos</h3>
+          <span class="section-hint">tópico chamado-critico → fila alertas-criticos-demo</span>
+        </div>
+        <div id="critical-alerts" class="critical-alerts"></div>
+        <div class="section-title">
+          <h3>Feed de auditoria (fan-out)</h3>
+          <span class="section-hint">o mesmo evento chamado-criado também chega em auditoria-demo</span>
+        </div>
+        <div id="audit-feed" class="critical-alerts"></div>
+      </section>
     <section class="workspace">
       <aside class="panel ticket-panel">
         <div class="panel-heading">
